@@ -1,196 +1,185 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include "RageBOT_Config.h"
 #include "Wifi manager.h"
 
 WebServer server(80);
 
-const char* AP_SSID = "RageBOT";
-const char* AP_PASSWORD = "RageBOT123";
-
-// Website HTML
-const char INDEX_HTML[] PROGMEM = R"RAGEBOT(
+const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RageBOT Control</title>
-<link rel="stylesheet" href="/style.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RageBOT Control</title>
+  <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<header>
-<h1>RageBOT</h1>
-<p id="connection">Connecting...</p>
-</header>
+  <h1>RAGEBOT</h1>
+  <p class="subtitle">Robot Control Dashboard</p>
 
-<main>
-<section class="panel">
-<h2>Camera</h2>
-<img id="camera" alt="Camera stream unavailable">
-<p id="cameraStatus">Waiting for camera...</p>
-</section>
+  <section class="card">
+    <h2>Camera</h2>
+    <img id="camera" src="" alt="Camera stream unavailable">
+  </section>
 
-<section class="panel">
-<h2>Distance Sensor</h2>
-<div id="distance">-- cm</div>
-<p id="obstacle">Waiting for sensor...</p>
-</section>
+  <section class="card">
+    <h2>Sensor Status</h2>
+    <p>Distance: <strong id="distance">--</strong> cm</p>
+    <p>Obstacle: <strong id="obstacle">--</strong></p>
+    <p>Movement: <strong id="command">STOP</strong></p>
+  </section>
 
-<section class="panel">
-<h2>Movement</h2>
-<div class="controls">
-<button onclick="move('FORWARD')">▲</button>
-<button onclick="move('LEFT')">◀</button>
-<button onclick="move('STOP')" class="stop">STOP</button>
-<button onclick="move('RIGHT')">▶</button>
-<button onclick="move('BACKWARD')">▼</button>
-</div>
-</section>
-</main>
-<script src="/script.js"></script>
+  <section class="card">
+    <h2>Movement</h2>
+    <div class="controls">
+      <button onclick="move('FORWARD')">FORWARD</button>
+      <button onclick="move('LEFT')">LEFT</button>
+      <button class="stop" onclick="move('STOP')">STOP</button>
+      <button onclick="move('RIGHT')">RIGHT</button>
+      <button onclick="move('BACKWARD')">BACKWARD</button>
+    </div>
+  </section>
+
+  <p id="connection">Connecting...</p>
+
+  <script src="/script.js"></script>
 </body>
 </html>
-)RAGEBOT";
+)rawliteral";
 
-// Website CSS
-const char STYLE_CSS[] PROGMEM = R"RAGEBOT(
-* { box-sizing: border-box; }
+const char STYLE_CSS[] PROGMEM = R"rawliteral(
+* {
+  box-sizing: border-box;
+}
 
 body {
-    margin: 0;
-    padding: 16px;
-    background: #10131b;
-    color: white;
-    font-family: Arial, sans-serif;
+  margin: 0;
+  padding: 18px;
+  background: #10131a;
+  color: white;
+  font-family: Arial, sans-serif;
+  text-align: center;
 }
 
-header {
-    text-align: center;
-    padding: 15px;
+h1 {
+  color: #55d6ff;
+  margin-bottom: 5px;
 }
 
-.panel {
-    background: #202633;
-    padding: 18px;
-    border-radius: 14px;
-    margin: 15px auto;
-    max-width: 500px;
-    text-align: center;
+.subtitle {
+  color: #aaa;
+}
+
+.card {
+  background: #202633;
+  border-radius: 12px;
+  padding: 16px;
+  margin: 16px auto;
+  max-width: 500px;
 }
 
 #camera {
-    width: 100%;
-    border-radius: 10px;
-    background: black;
-    min-height: 150px;
-    object-fit: contain;
-}
-
-#distance {
-    font-size: 40px;
-    font-weight: bold;
+  width: 100%;
+  max-width: 450px;
+  min-height: 100px;
+  background: #080a0e;
+  border-radius: 8px;
+  object-fit: contain;
 }
 
 .controls {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 12px;
-    max-width: 300px;
-    margin: auto;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 9px;
 }
 
 button {
-    padding: 18px 8px;
-    font-size: 20px;
-    border: 0;
-    border-radius: 10px;
-    background: #3b82f6;
-    color: white;
-    font-weight: bold;
+  padding: 16px 5px;
+  border: 0;
+  border-radius: 8px;
+  background: #168bd0;
+  color: white;
+  font-weight: bold;
+  cursor: pointer;
 }
 
-.stop { background: #dc2626; }
-)RAGEBOT";
+button:active {
+  background: #075b91;
+}
 
-// Website JavaScript
-const char SCRIPT_JS[] PROGMEM = R"RAGEBOT(
+.stop {
+  background: #d43c3c;
+}
+
+#connection {
+  color: #55d6ff;
+}
+)rawliteral";
+
+const char SCRIPT_JS[] PROGMEM = R"rawliteral(
+// Change this to the actual ESP32-CAM stream URL.
 const cameraURL = "http://192.168.4.2:81/stream";
 
-const camera = document.getElementById("camera");
-camera.src = cameraURL;
-
-camera.onload = () => {
-    document.getElementById("cameraStatus").textContent =
-        "Camera connected";
-};
-
-camera.onerror = () => {
-    document.getElementById("cameraStatus").textContent =
-        "Camera unavailable";
-};
+document.getElementById("camera").src = cameraURL;
 
 async function move(direction) {
-    try {
-        const response = await fetch(
-            `/move?dir=${encodeURIComponent(direction)}`
-        );
+  try {
+    const response = await fetch(
+      "/move?dir=" + direction
+    );
 
-        if (!response.ok) throw new Error("Command failed");
-    } catch (error) {
-        document.getElementById("connection").textContent =
-            "Command failed";
-    }
+    const result = await response.text();
+    document.getElementById("command").textContent = result;
+  } catch (error) {
+    document.getElementById("connection").textContent =
+      "Movement request failed";
+  }
 }
 
 async function updateStatus() {
-    try {
-        const response = await fetch("/status");
+  try {
+    const response = await fetch("/status");
+    const data = await response.json();
 
-        if (!response.ok) throw new Error("Status unavailable");
+    document.getElementById("distance").textContent =
+      data.distance < 0 ? "No reading" : data.distance;
 
-        const data = await response.json();
+    document.getElementById("obstacle").textContent =
+      data.obstacle ? "DETECTED" : "CLEAR";
 
-        document.getElementById("connection").textContent =
-            "ESP32 connected";
+    document.getElementById("command").textContent =
+      data.command;
 
-        document.getElementById("distance").textContent =
-            data.distance < 0 ? "-- cm" : `${data.distance} cm`;
-
-        document.getElementById("obstacle").textContent =
-            data.obstacle ? "Obstacle detected" : "Path clear";
-
-    } catch (error) {
-        document.getElementById("connection").textContent =
-            "ESP32 disconnected";
-    }
+    document.getElementById("connection").textContent =
+      "RageBOT connected";
+  } catch (error) {
+    document.getElementById("connection").textContent =
+      "Connection lost";
+  }
 }
 
 setInterval(updateStatus, 500);
 updateStatus();
-)RAGEBOT";
+)rawliteral";
 
 void wifiBegin() {
-    WiFi.mode(WIFI_AP);
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(WIFI_SSID, WIFI_PASSWORD);
 
-    if (!WiFi.softAP(AP_SSID, AP_PASSWORD)) {
-        Serial.println("WiFi AP failed!");
-        return;
-    }
+  server.on("/", HTTP_GET, []() {
+    server.send_P(200, "text/html", INDEX_HTML);
+  });
 
-    server.on("/", HTTP_GET, []() {
-        server.send_P(200, "text/html", INDEX_HTML);
-    });
+  server.on("/style.css", HTTP_GET, []() {
+    server.send_P(200, "text/css", STYLE_CSS);
+  });
 
-    server.on("/style.css", HTTP_GET, []() {
-        server.send_P(200, "text/css", STYLE_CSS);
-    });
+  server.on("/script.js", HTTP_GET, []() {
+    server.send_P(200, "application/javascript", SCRIPT_JS);
+  });
 
-    server.on("/script.js", HTTP_GET, []() {
-        server.send_P(200, "application/javascript", SCRIPT_JS);
-    });
-
-    Serial.println("RageBOT WiFi started");
-    Serial.print("Dashboard: http://");
-    Serial.println(WiFi.softAPIP());
+  Serial.println("RageBOT Wi-Fi started");
+  Serial.print("Dashboard: http://");
+  Serial.println(WiFi.softAPIP());
 }
