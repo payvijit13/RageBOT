@@ -1,0 +1,43 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RageBOT Control</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+    <h1>RageBOT</h1>
+    <p id="connection">Connecting...</p>
+</header>
+
+<main>
+    <section class="panel">
+        <h2>Camera</h2>
+        <img id="camera" alt="Camera stream unavailable">
+        <p id="cameraStatus">Camera URL needs configuration</p>
+    </section>
+
+    <section class="panel">
+        <h2>Distance Sensor</h2>
+        <div id="distance">-- cm</div>
+        <p id="obstacle">Waiting for sensor...</p>
+    </section>
+
+    <section class="panel">
+        <h2>Movement</h2>
+        <div class="controls">
+            <button onclick="move('FORWARD')">▲</button>
+            <button onclick="move('LEFT')">◀</button>
+            <button onclick="move('STOP')" class="stop">STOP</button>
+            <button onclick="move('RIGHT')">▶</button>
+            <button onclick="move('BACKWARD')">▼</button>
+        </div>
+    </section>
+</main>
+
+<script src="script.js"></script>
+</body>
+</html>
