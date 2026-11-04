@@ -1,4 +1,3 @@
-
 #include <Arduino.h>
 #include "RageBOT_Config.h"
 #include "Sensor.h"
@@ -19,11 +18,14 @@ float sensorReadDistance() {
 
   digitalWrite(TRIG_PIN, LOW);
 
-  unsigned long duration =
-    pulseIn(ECHO_PIN, HIGH, 30000);
+  unsigned long duration = pulseIn(
+    ECHO_PIN,
+    HIGH,
+    SENSOR_TIMEOUT_US
+  );
 
   if (duration == 0) {
-    return -1;
+    return -1.0f;
   }
 
   return duration * 0.0343f / 2.0f;
@@ -32,6 +34,6 @@ float sensorReadDistance() {
 bool sensorObstacleDetected() {
   float distance = sensorReadDistance();
 
-  return distance > 0 &&
+  return distance < 0 ||
          distance <= OBSTACLE_DISTANCE;
 }

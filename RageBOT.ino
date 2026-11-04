@@ -1,15 +1,27 @@
-
 #include <Arduino.h>
 #include "RageBOT_Config.h"
 #include "Sensor.h"
 #include "Wifi manager.h"
 #include "Camera/camera.h"
 
-bool obstacleStop = true;
+enum AutoState {
+  WAIT_SENSOR,
+  DRIVING_FORWARD,
+  REVERSING,
+  TURNING
+};
+
+String controlMode = "STOP";
 String currentCommand = "STOP";
 
+AutoState autoState = WAIT_SENSOR;
+
 float distanceCM = -1;
+
 unsigned long lastSensorUpdate = 0;
+unsigned long stateStart = 0;
+
+bool turnLeftNext = true;
 
 void stopMotors() {
   digitalWrite(MOTOR_IN1, LOW);
@@ -23,10 +35,13 @@ void stopMotors() {
   currentCommand = "STOP";
 }
 
-void moveForward() {
-  if (obstacleStop &&
-      distanceCM > 0 &&
-      distanceCM <= OBSTACLE_DISTANCE) {
+bool sensorBlocked() {
+  return distanceCM < 0 ||
+         distanceCM <= OBSTACLE_DISTANCE;
+}
+
+void driveForward() {
+  if (sensorBlocked()) {
     stopMotors();
     return;
   }
@@ -42,7 +57,7 @@ void moveForward() {
   currentCommand = "FORWARD";
 }
 
-void moveBackward() {
+void driveBackward() {
   digitalWrite(MOTOR_IN1, LOW);
   digitalWrite(MOTOR_IN2, HIGH);
   digitalWrite(MOTOR_IN3, LOW);
@@ -78,7 +93,67 @@ void turnRight() {
   currentCommand = "RIGHT";
 }
 
+void startAvoidance() {
+  stopMotors();
+
+  driveBackward();
+
+  autoState = REVERSING;
+  stateStart = millis();
+}
+
+void startAuto() {
+  stopMotors();
+
+  controlMode = "AUTO";
+  autoState = WAIT_SENSOR;
+}
+
+void startManual() {
+  stopMotors();
+
+  controlMode = "MANUAL";
+}
+
+void emergencyStop() {
+  controlMode = "STOP";
+  autoState = WAIT_SENSOR;
+
+  stopMotors();
+}
+
+void handleMode() {
+  if (!server.hasArg("set")) {
+    server.send(400, "text/plain", "Missing mode");
+    return;
+  }
+
+  String requested = server.arg("set");
+  requested.toUpperCase();
+
+  if (requested == "AUTO") {
+    startAuto();
+  }
+  else if (requested == "MANUAL") {
+    startManual();
+  }
+  else if (requested == "STOP") {
+    emergencyStop();
+  }
+  else {
+    server.send(400, "text/plain", "Invalid mode");
+    return;
+  }
+
+  server.send(200, "text/plain", controlMode);
+}
+
 void handleMove() {
+  if (controlMode != "MANUAL") {
+    server.send(409, "text/plain", "Enable MANUAL mode first");
+    return;
+  }
+
   if (!server.hasArg("dir")) {
     server.send(400, "text/plain", "Missing direction");
     return;
@@ -89,15 +164,26 @@ void handleMove() {
 
   if (dir == "STOP") {
     stopMotors();
-  } else if (dir == "FORWARD") {
-    moveForward();
-  } else if (dir == "BACKWARD") {
-    moveBackward();
-  } else if (dir == "LEFT") {
+  }
+  else if (dir == "FORWARD") {
+    if (sensorBlocked()) {
+      stopMotors();
+      server.send(409, "text/plain", "Blocked: sensor or obstacle");
+      return;
+    }
+
+    driveForward();
+  }
+  else if (dir == "BACKWARD") {
+    driveBackward();
+  }
+  else if (dir == "LEFT") {
     turnLeft();
-  } else if (dir == "RIGHT") {
+  }
+  else if (dir == "RIGHT") {
     turnRight();
-  } else {
+  }
+  else {
     server.send(400, "text/plain", "Invalid direction");
     return;
   }
@@ -106,17 +192,89 @@ void handleMove() {
 }
 
 void handleStatus() {
-  bool obstacle =
-    distanceCM > 0 && distanceCM <= OBSTACLE_DISTANCE;
+  bool valid = distanceCM >= 0;
+  bool obstacle = valid &&
+                  distanceCM <= OBSTACLE_DISTANCE;
 
   String json = "{";
-  json += "\"distance\":" + String(distanceCM, 1) + ",";
-  json += "\"obstacle\":" + String(obstacle ? "true" : "false") + ",";
+
+  json += "\"mode\":\"" + controlMode + "\",";
   json += "\"command\":\"" + currentCommand + "\",";
-  json += "\"wifi\":\"connected\"";
+  json += "\"distance\":" + String(distanceCM, 1) + ",";
+  json += "\"sensorValid\":";
+  json += valid ? "true," : "false,";
+  json += "\"obstacle\":";
+  json += obstacle ? "true" : "false";
+
   json += "}";
 
   server.send(200, "application/json", json);
+}
+
+void autonomousLoop() {
+  if (controlMode != "AUTO") {
+    return;
+  }
+
+  // Invalid readings always stop the robot.
+  if (distanceCM < 0) {
+    stopMotors();
+    autoState = WAIT_SENSOR;
+    return;
+  }
+
+  switch (autoState) {
+
+    case WAIT_SENSOR:
+
+      if (distanceCM > OBSTACLE_DISTANCE) {
+        driveForward();
+        autoState = DRIVING_FORWARD;
+      } else {
+        startAvoidance();
+      }
+
+      break;
+
+    case DRIVING_FORWARD:
+
+      if (distanceCM <= OBSTACLE_DISTANCE) {
+        startAvoidance();
+      }
+
+      break;
+
+    case REVERSING:
+
+      if (millis() - stateStart >= REVERSE_TIME_MS) {
+
+        stopMotors();
+
+        if (turnLeftNext) {
+          turnLeft();
+        } else {
+          turnRight();
+        }
+
+        turnLeftNext = !turnLeftNext;
+
+        autoState = TURNING;
+        stateStart = millis();
+      }
+
+      break;
+
+    case TURNING:
+
+      if (millis() - stateStart >= TURN_TIME_MS) {
+
+        stopMotors();
+
+        autoState = WAIT_SENSOR;
+      }
+
+      break;
+  }
 }
 
 void setup() {
@@ -132,12 +290,13 @@ void setup() {
 
   pinMode(LED_PIN, OUTPUT);
 
-  stopMotors();
-  sensorBegin();
+  emergencyStop();
 
+  sensorBegin();
   cameraBegin();
   wifiBegin();
 
+  server.on("/mode", HTTP_GET, handleMode);
   server.on("/move", HTTP_GET, handleMove);
   server.on("/status", HTTP_GET, handleStatus);
 
@@ -145,26 +304,25 @@ void setup() {
 
   Serial.println();
   Serial.println("RAGEBOT ONLINE");
+  Serial.println("Autonomous controller ready");
   Serial.println("Dashboard: http://192.168.4.1");
 }
 
 void loop() {
   server.handleClient();
 
-  if (millis() - lastSensorUpdate >= 250) {
+  if (millis() - lastSensorUpdate >=
+      SENSOR_UPDATE_INTERVAL_MS) {
+
     lastSensorUpdate = millis();
 
     distanceCM = sensorReadDistance();
 
-    bool obstacle =
-      distanceCM > 0 && distanceCM <= OBSTACLE_DISTANCE;
-
-    digitalWrite(LED_PIN, obstacle ? HIGH : LOW);
-
-    if (obstacle &&
-        obstacleStop &&
-        currentCommand == "FORWARD") {
-      stopMotors();
-    }
+    digitalWrite(
+      LED_PIN,
+      sensorBlocked() ? HIGH : LOW
+    );
   }
+
+  autonomousLoop();
 }

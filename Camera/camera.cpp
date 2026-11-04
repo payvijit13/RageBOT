@@ -1,14 +1,8 @@
-
-
 #include <Arduino.h>
+#include "../RageBOT_Config.h"
 #include "camera.h"
 
-const char* CAMERA_STREAM_URL =
-  "http://192.168.4.2:81/stream";
-
 void cameraBegin() {
-  Serial.println("Camera integration configured.");
-  Serial.print("Expected camera stream: ");
+  Serial.println("ESP32-CAM stream address:");
   Serial.println(CAMERA_STREAM_URL);
 }
-
